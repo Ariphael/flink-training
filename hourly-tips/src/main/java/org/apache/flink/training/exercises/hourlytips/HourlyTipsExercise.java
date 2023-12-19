@@ -19,6 +19,7 @@
 package org.apache.flink.training.exercises.hourlytips;
 
 import org.apache.flink.api.common.JobExecutionResult;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.java.tuple.Tuple3;
@@ -33,7 +34,6 @@ import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.training.exercises.common.datatypes.TaxiFare;
 import org.apache.flink.training.exercises.common.sources.TaxiFareGenerator;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
 import org.apache.flink.util.Collector;
 
 /**
@@ -80,38 +80,23 @@ public class HourlyTipsExercise {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         // start the data generator
-        DataStream<TaxiFare> fares = env.addSource(source);
+        DataStream<TaxiFare> fares = env
+            .addSource(source)
+            .assignTimestampsAndWatermarks(
+                WatermarkStrategy
+                    .<TaxiFare>forMonotonousTimestamps()
+                    .withTimestampAssigner((fare, t) -> fare.getEventTimeMillis())
+            );
 
-        DataStream<Tuple3<Long, Long, Float>> hourlyMax = fares
+        DataStream<Tuple3<Long, Long, Float>> tips = fares
             .keyBy(fare -> fare.driverId)
             .window(TumblingEventTimeWindows.of(Time.hours(1)))
             .process(new HourlyTipsProcessWindowFunction());
 
-            // .windowAll(TumblingEventTimeWindows.of(Time.hours(1)))
-            // .reduce(new ReduceFunction<Tuple3<Long, Long, Float>>() {
-            //     public Tuple3<Long, Long, Float> reduce(
-            //         Tuple3<Long, Long, Float> hourlyMaxTipsTupleA, 
-            //         Tuple3<Long, Long, Float> hourlyMaxTipsTupleB
-            //     ) {
-            //         return hourlyMaxTipsTupleA.f2 > hourlyMaxTipsTupleB.f2 
-            //             ? hourlyMaxTipsTupleA 
-            //             : hourlyMaxTipsTupleB;
-            //     }
-            // });
-
-        DataStream<Tuple3<Long, Long, Float>> stream = hourlyMax.windowAll(TumblingEventTimeWindows.of(Time.hours(1))).maxBy("2");
-        stream.addSink(sink);
-        //hourlyMax.addSink(sink);
-
-        // the results should be sent to the sink that was passed in
-        // (otherwise the tests won't work)
-        // you can end the pipeline with something like this:
-
-        // DataStream<Tuple3<Long, Long, Float>> hourlyMax = ...
-        // hourlyMax.addSink(sink);
-
-        // execute the pipeline and return the result
-
+        DataStream<Tuple3<Long, Long, Float>> hourlyMax = tips
+            .windowAll(TumblingEventTimeWindows.of(Time.hours(1)))
+            .maxBy("2");
+        hourlyMax.addSink(sink);
 
         return env.execute("Hourly Tips");
     }
